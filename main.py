@@ -6,7 +6,7 @@
 - 경계 데이터: 전국 시군구 255개 GeoJSON
 - '코드' 열을 기준으로 인구 데이터(읍면동)와 경계 데이터(시군구)를 연결한다.
 - 연도 슬라이더, 지표 선택(고령화율/유소년 비율), 시도 확대 기능 포함
-- 이 버전은 배경 그라데이션 + 유리질(glass) 카드 UI로 한 단계 더 다듬은 버전이다.
+- 지도에서 지역을 클릭/선택하면 지도 왼쪽 위 패널에 정보 표로 정리해서 보여준다.
 """
 
 import re
@@ -241,6 +241,35 @@ def inject_style() -> None:
             display: inline-block;
         }
 
+        /* 지도 왼쪽 위 '선택한 지역' 패널 */
+        .selection-panel-title {
+            font-size: 0.85rem;
+            font-weight: 700;
+            color: #374151;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .selection-empty {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            gap: 6px;
+            color: #9ca3af;
+            font-size: 0.8rem;
+            background: #f7f8fc;
+            border: 1px dashed #dcdfe6;
+            border-radius: 14px;
+            padding: 24px 10px;
+            height: 100%;
+        }
+        .selection-empty .big {
+            font-size: 1.6rem;
+        }
+
         /* 알림 박스 */
         div[data-testid="stAlert"] {
             border-radius: 16px;
@@ -403,6 +432,22 @@ def build_geo_table(geojson_data: dict) -> pd.DataFrame:
     return geo_df
 
 
+def extract_selected_codes(map_event) -> list:
+    """plotly 선택 이벤트에서 클릭/선택된 지역의 '코드' 목록을 뽑아낸다."""
+    if not map_event:
+        return []
+    selection = map_event.get("selection") if hasattr(map_event, "get") else None
+    if not selection:
+        return []
+    points = selection.get("points", [])
+    codes = []
+    for pt in points:
+        loc = pt.get("location")
+        if loc is not None:
+            codes.append(loc)
+    return codes
+
+
 # ----------------------------------------------------------------------------
 # 4. 화면 그리기 시작
 # ----------------------------------------------------------------------------
@@ -535,7 +580,7 @@ with card3:
     )
 
 # ----------------------------------------------------------------------------
-# 8. 지도 그리기
+# 8. 지도 그리기 + 왼쪽 위 '선택한 지역' 정보 패널
 # ----------------------------------------------------------------------------
 st.markdown(
     f'<div class="section-title">🗺️ {selected_year}년 {metric_name} 지도'
@@ -568,13 +613,46 @@ fig.update_layout(
     font=dict(family="Pretendard, sans-serif", color="#374151"),
 )
 
+# 연도 · 지표 · 시도가 바뀌면 이전 클릭 선택이 새 지도와 어긋나지 않도록 키를 새로 만든다
+chart_key = f"choropleth_{selected_year}_{metric_name}_{selected_sido}"
+
 with st.container(border=True):
     st.markdown(legend_html(cfg), unsafe_allow_html=True)
-    st.plotly_chart(
-        fig,
-        use_container_width=True,
-        config={"displaylogo": False, "modeBarButtonsToRemove": ["select2d", "lasso2d"]},
-    )
+    info_col, map_col = st.columns([1, 3.2])
+
+    # 지도를 먼저 그려서 클릭/선택 결과(map_event)를 얻는다
+    with map_col:
+        map_event = st.plotly_chart(
+            fig,
+            use_container_width=True,
+            config={"displaylogo": False, "modeBarButtonsToRemove": ["select2d", "lasso2d"]},
+            on_select="rerun",
+            selection_mode=["points"],
+            key=chart_key,
+        )
+
+    # 지도 왼쪽 위 패널: 클릭/선택한 지역을 표로 정리해서 보여준다
+    with info_col:
+        st.markdown('<div class="selection-panel-title">🖱️ 선택한 지역</div>', unsafe_allow_html=True)
+        selected_codes = extract_selected_codes(map_event)
+
+        if selected_codes:
+            info_df = (
+                view_df[view_df["코드"].isin(selected_codes)][["시도", "시군구", "비율_표시"]]
+                .rename(columns={"비율_표시": cfg["short"]})
+                .reset_index(drop=True)
+            )
+            st.dataframe(info_df, hide_index=True, use_container_width=True)
+        else:
+            st.markdown(
+                """
+                <div class="selection-empty">
+                    <div class="big">👆</div>
+                    지도를 클릭하면<br>선택한 지역 정보가<br>여기에 표시됩니다
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
 # 데이터가 없어 회색으로 표시된 지역 안내
 missing_in_view = view_df[view_df["비율"].isna()]
