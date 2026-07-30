@@ -6,6 +6,7 @@
 - 경계 데이터: 전국 시군구 255개 GeoJSON
 - '코드' 열을 기준으로 인구 데이터(읍면동)와 경계 데이터(시군구)를 연결한다.
 - 연도 슬라이더, 지표 선택(고령화율/유소년 비율), 시도 확대 기능 포함
+- 이 버전은 디자인(카드 · 색 · 표)을 다듬은 버전이다.
 """
 
 import re
@@ -19,7 +20,7 @@ import streamlit as st
 # ----------------------------------------------------------------------------
 # 0. 기본 설정
 # ----------------------------------------------------------------------------
-st.set_page_config(page_title="전국 고령화 지도", layout="wide")
+st.set_page_config(page_title="전국 고령화 지도", page_icon="🗺️", layout="wide")
 
 POP_URL = "https://raw.githubusercontent.com/greatsong/modudata/main/data/population_yearly.csv.gz"
 GEOJSON_URL = "https://raw.githubusercontent.com/greatsong/modudata/main/data/boundaries/sigungu_kr.geojson"
@@ -35,17 +36,21 @@ METRIC_CONFIG = {
     "고령화율 (65세 이상 비율)": {
         "ratio_col": "고령화율",
         "count_col": "고령인구",
+        "short": "고령화율",
+        "icon": "👴",
         "bins": [-np.inf, 19, 23, 28, 38, np.inf],
         "labels": ["19% 미만", "19% ~ 23%", "23% ~ 28%", "28% ~ 38%", "38% 이상"],
         # 옅은 색 -> 진한 색 (5단계로 끊어서 칠하고, 연속 그라데이션은 쓰지 않는다)
-        "colors": ["#fee5d9", "#fcae91", "#fb6a4a", "#de2d26", "#a50f15"],
+        "colors": ["#fef0e6", "#fbc59a", "#f5904f", "#e2611f", "#a8380f"],
     },
     "유소년 비율 (0~14세 비율)": {
         "ratio_col": "유소년비율",
         "count_col": "유소년인구",
+        "short": "유소년 비율",
+        "icon": "🧒",
         "bins": [-np.inf, 6, 8, 10, 12, np.inf],
         "labels": ["6% 미만", "6% ~ 8%", "8% ~ 10%", "10% ~ 12%", "12% 이상"],
-        "colors": ["#eff3ff", "#bdd7e7", "#6baed6", "#3182bd", "#08519c"],
+        "colors": ["#e9f1fb", "#b9d6f2", "#7fb2e6", "#3d7fc9", "#1c4e8a"],
     },
 }
 
@@ -64,9 +69,132 @@ SIDO_RENAME = {
     "전라북도": "전북특별자치도",
 }
 
+ACCENT = "#6C5CE7"      # 전국 카드에 쓰는 포인트 색
+
 
 # ----------------------------------------------------------------------------
-# 1. 데이터 불러오기 (한 번 불러온 결과는 캐시에 저장해서 재사용)
+# 1. 화면 스타일 (커스텀 CSS) — 카드형 UI, 한글 친화 폰트, 여백 정리
+# ----------------------------------------------------------------------------
+def inject_style() -> None:
+    st.markdown(
+        """
+        <style>
+        @import url('https://cdn.jsdelivr.net/gh/orioncactus/[email protected]/dist/web/static/pretendard.css');
+
+        html, body, [class*="css"] {
+            font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Malgun Gothic', sans-serif;
+        }
+
+        .main .block-container {
+            padding-top: 2rem;
+            padding-bottom: 3rem;
+            max-width: 1180px;
+        }
+
+        /* 상단 타이틀 영역 */
+        .app-header {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            margin-bottom: 0.2rem;
+        }
+        .app-title {
+            font-size: 2.1rem;
+            font-weight: 800;
+            color: #1e1b4b;
+            letter-spacing: -0.5px;
+        }
+        .app-sub {
+            color: #6b7280;
+            font-size: 0.98rem;
+            margin: 0.1rem 0 1.6rem 0;
+        }
+
+        /* 테두리가 있는 컨테이너(st.container(border=True))를 카드처럼 */
+        div[data-testid="stVerticalBlockBorderWrapper"] {
+            background: #ffffff;
+            border-radius: 18px;
+            border: 1px solid #eef0f4;
+            box-shadow: 0 4px 18px rgba(15, 23, 42, 0.05);
+        }
+        div[data-testid="stVerticalBlockBorderWrapper"] > div {
+            border-radius: 18px;
+        }
+
+        /* 섹션 소제목 */
+        .section-title {
+            font-size: 1.05rem;
+            font-weight: 700;
+            color: #1e293b;
+            border-left: 4px solid #6C5CE7;
+            padding-left: 10px;
+            margin: 0.2rem 0 0.9rem 0;
+        }
+
+        /* 위젯 라벨 */
+        label, .stSlider label, .stSelectbox label {
+            font-weight: 600 !important;
+            color: #374151 !important;
+            font-size: 0.88rem !important;
+        }
+
+        /* KPI 카드 */
+        .kpi-card {
+            background: #ffffff;
+            border-radius: 18px;
+            padding: 18px 20px 16px 20px;
+            border: 1px solid #eef0f4;
+            box-shadow: 0 4px 18px rgba(15, 23, 42, 0.05);
+            border-top: 5px solid var(--accent, #6C5CE7);
+            height: 100%;
+        }
+        .kpi-label {
+            font-size: 0.82rem;
+            font-weight: 700;
+            color: #6b7280;
+            margin-bottom: 6px;
+        }
+        .kpi-value {
+            font-size: 1.55rem;
+            font-weight: 800;
+            color: #111827;
+            line-height: 1.25;
+        }
+        .kpi-sub {
+            font-size: 0.85rem;
+            color: #9ca3af;
+            margin-top: 4px;
+        }
+
+        /* 알림 박스 */
+        div[data-testid="stAlert"] {
+            border-radius: 14px;
+        }
+
+        /* 데이터프레임 모서리 둥글게 */
+        div[data-testid="stDataFrame"] {
+            border-radius: 14px;
+            overflow: hidden;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def kpi_card(label: str, value: str, sub: str, accent: str, icon: str) -> str:
+    """지표 카드 하나를 HTML로 만든다."""
+    return f"""
+    <div class="kpi-card" style="--accent: {accent};">
+        <div class="kpi-label">{icon} &nbsp;{label}</div>
+        <div class="kpi-value">{value}</div>
+        <div class="kpi-sub">{sub}</div>
+    </div>
+    """
+
+
+# ----------------------------------------------------------------------------
+# 2. 데이터 불러오기 (한 번 불러온 결과는 캐시에 저장해서 재사용)
 # ----------------------------------------------------------------------------
 @st.cache_data(show_spinner="인구 데이터를 내려받는 중입니다...")
 def load_population() -> pd.DataFrame:
@@ -101,7 +229,7 @@ def fix_old_code(code: str) -> str:
 
 
 # ----------------------------------------------------------------------------
-# 2. 연도별 · 시군구별 인구 통계 계산 (모든 연도를 한 번에 계산해서 캐시에 저장)
+# 3. 연도별 · 시군구별 인구 통계 계산 (모든 연도를 한 번에 계산해서 캐시에 저장)
 # ----------------------------------------------------------------------------
 @st.cache_data(show_spinner="연도별 시군구 인구를 계산하는 중입니다...")
 def build_full_table(df: pd.DataFrame) -> pd.DataFrame:
@@ -176,43 +304,53 @@ def build_geo_table(geojson_data: dict) -> pd.DataFrame:
 
 
 # ----------------------------------------------------------------------------
-# 3. 데이터 준비
+# 4. 화면 그리기 시작
 # ----------------------------------------------------------------------------
+inject_style()
+
 population_df = load_population()
 geojson_data = load_geojson()
 full_table = build_full_table(population_df)
 geo_table = build_geo_table(geojson_data)
 
-st.title("🗺️ 전국 고령화 지도")
-st.caption("시군구별 인구 구조(고령화율 · 유소년 비율)를 5단계로 나누어 표시합니다.")
+st.markdown(
+    """
+    <div class="app-header">
+        <div class="app-title">🗺️ 전국 고령화 지도</div>
+    </div>
+    <div class="app-sub">시군구별 인구 구조(고령화율 · 유소년 비율)를 5단계로 나누어 살펴봅니다.</div>
+    """,
+    unsafe_allow_html=True,
+)
 
 # ----------------------------------------------------------------------------
-# 4. 화면 상단 컨트롤: 연도 슬라이더 / 지표 선택 / 시도 선택
+# 5. 컨트롤 패널 (연도 슬라이더 / 지표 선택 / 시도 선택)
 # ----------------------------------------------------------------------------
-ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([2, 1, 1])
+with st.container(border=True):
+    ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([2, 1, 1])
 
-year_min = int(full_table["연도"].min())
-year_max = int(full_table["연도"].max())
+    year_min = int(full_table["연도"].min())
+    year_max = int(full_table["연도"].max())
 
-with ctrl_col1:
-    selected_year = st.slider(
-        "연도 선택", min_value=year_min, max_value=year_max, value=year_max, step=1
-    )
+    with ctrl_col1:
+        selected_year = st.slider(
+            "📅 연도 선택", min_value=year_min, max_value=year_max, value=year_max, step=1
+        )
 
-with ctrl_col2:
-    metric_name = st.selectbox("지표 선택", list(METRIC_CONFIG.keys()))
+    with ctrl_col2:
+        metric_name = st.selectbox("📊 지표 선택", list(METRIC_CONFIG.keys()))
 
-with ctrl_col3:
-    # 경계 데이터에 실제로 있는 시도만 선택지로 제공 (없는 이름이 섞이지 않도록)
-    available_sido = [s for s in SIDO_ORDER if s == "전국" or s in geo_table["시도"].unique()]
-    selected_sido = st.selectbox("시도 선택 (확대)", available_sido)
+    with ctrl_col3:
+        # 경계 데이터에 실제로 있는 시도만 선택지로 제공 (없는 이름이 섞이지 않도록)
+        available_sido = [s for s in SIDO_ORDER if s == "전국" or s in geo_table["시도"].unique()]
+        selected_sido = st.selectbox("📍 시도 선택 (확대)", available_sido)
 
 cfg = METRIC_CONFIG[metric_name]
 ratio_col = cfg["ratio_col"]
 count_col = cfg["count_col"]
 
 # ----------------------------------------------------------------------------
-# 5. 선택한 연도의 시군구 데이터 + 경계 데이터 합치기
+# 6. 선택한 연도의 시군구 데이터 + 경계 데이터 합치기
 # ----------------------------------------------------------------------------
 year_df = full_table[full_table["연도"] == selected_year].copy()
 year_df["코드_보정"] = year_df["시군구코드"].apply(fix_old_code)
@@ -248,7 +386,7 @@ else:
     view_df = merged
 
 # ----------------------------------------------------------------------------
-# 6. 지표 카드 3장 (전국 기준 - 시도 선택과 무관하게 항상 전국 값)
+# 7. 지표 카드 3장 (전국 기준 - 시도 선택과 무관하게 항상 전국 값)
 # ----------------------------------------------------------------------------
 nation_total = year_df["전체인구"].sum()
 nation_count = year_df[count_col].sum()
@@ -257,27 +395,51 @@ nation_ratio = nation_count / nation_total * 100 if nation_total else np.nan
 row_max = year_df.loc[year_df[ratio_col].idxmax()]
 row_min = year_df.loc[year_df[ratio_col].idxmin()]
 
+st.write("")
 card1, card2, card3 = st.columns(3)
 with card1:
-    st.metric(f"전국 {metric_name.split(' ')[0]}", f"{nation_ratio:.1f}%")
+    st.markdown(
+        kpi_card(
+            f"전국 {cfg['short']} ({selected_year}년)",
+            f"{nation_ratio:.1f}%",
+            "전국 시군구 합산 기준",
+            ACCENT,
+            "🇰🇷",
+        ),
+        unsafe_allow_html=True,
+    )
 with card2:
-    st.metric(
-        "가장 높은 시군구",
-        f"{row_max['시군구']} · {row_max[ratio_col]:.1f}%",
-        row_max["시도"],
-        delta_color="off",
+    st.markdown(
+        kpi_card(
+            f"가장 높은 시군구",
+            f"{row_max['시군구']} · {row_max[ratio_col]:.1f}%",
+            row_max["시도"],
+            cfg["colors"][-1],
+            "🔺",
+        ),
+        unsafe_allow_html=True,
     )
 with card3:
-    st.metric(
-        "가장 낮은 시군구",
-        f"{row_min['시군구']} · {row_min[ratio_col]:.1f}%",
-        row_min["시도"],
-        delta_color="off",
+    st.markdown(
+        kpi_card(
+            f"가장 낮은 시군구",
+            f"{row_min['시군구']} · {row_min[ratio_col]:.1f}%",
+            row_min["시도"],
+            cfg["colors"][0] if cfg["colors"][0] != "#eef0f4" else "#9ca3af",
+            "🔻",
+        ),
+        unsafe_allow_html=True,
     )
 
 # ----------------------------------------------------------------------------
-# 7. 지도 그리기
+# 8. 지도 그리기
 # ----------------------------------------------------------------------------
+st.markdown(
+    f'<div class="section-title">🗺️ {selected_year}년 {metric_name} 지도'
+    f'{" · " + selected_sido if selected_sido != "전국" else ""}</div>',
+    unsafe_allow_html=True,
+)
+
 fig = px.choropleth(
     view_df,
     geojson=geojson_data,
@@ -293,14 +455,33 @@ fig = px.choropleth(
 
 # 배경 지도(타일) 없이 경계선만 보이도록 설정
 fig.update_geos(visible=False, fitbounds="locations")
-fig.update_traces(marker_line_color="white", marker_line_width=0.5)
+fig.update_traces(marker_line_color="white", marker_line_width=0.6)
 fig.update_layout(
-    margin={"r": 0, "t": 10, "l": 0, "b": 0},
-    legend_title_text="구간",
-    height=650,
+    margin={"r": 10, "t": 10, "l": 10, "b": 10},
+    height=620,
+    paper_bgcolor="rgba(0,0,0,0)",
+    plot_bgcolor="rgba(0,0,0,0)",
+    font=dict(family="Pretendard, sans-serif", color="#374151"),
+    legend=dict(
+        title=None,
+        orientation="h",
+        yanchor="bottom",
+        y=-0.08,
+        xanchor="center",
+        x=0.5,
+        bgcolor="rgba(255,255,255,0.9)",
+        bordercolor="#e5e7eb",
+        borderwidth=1,
+        font=dict(size=12),
+    ),
 )
 
-st.plotly_chart(fig, use_container_width=True)
+with st.container(border=True):
+    st.plotly_chart(
+        fig,
+        use_container_width=True,
+        config={"displaylogo": False, "modeBarButtonsToRemove": ["select2d", "lasso2d"]},
+    )
 
 # 데이터가 없어 회색으로 표시된 지역 안내
 missing_in_view = view_df[view_df["비율"].isna()]
@@ -312,22 +493,48 @@ if not missing_in_view.empty:
     )
 
 # ----------------------------------------------------------------------------
-# 8. 상위 10 / 하위 10 표
+# 9. 상위 10 / 하위 10 표
 # ----------------------------------------------------------------------------
-st.subheader(f"{metric_name} 상위·하위 지역 ({selected_year}년, 전국 기준)")
+st.markdown(
+    f'<div class="section-title">📋 {metric_name} 상위·하위 지역 '
+    f"({selected_year}년, 전국 기준)</div>",
+    unsafe_allow_html=True,
+)
 
 display_df = year_df[["시도", "시군구", ratio_col]].rename(columns={ratio_col: metric_name}).copy()
 display_df[metric_name] = display_df[metric_name].round(1)
 
 top10 = display_df.sort_values(metric_name, ascending=False).head(10).reset_index(drop=True)
 bottom10 = display_df.sort_values(metric_name, ascending=True).head(10).reset_index(drop=True)
-top10.index = top10.index + 1
-bottom10.index = bottom10.index + 1
+top10.insert(0, "순위", range(1, len(top10) + 1))
+bottom10.insert(0, "순위", range(1, len(bottom10) + 1))
+
+bar_max = float(display_df[metric_name].max())
 
 col_left, col_right = st.columns(2)
 with col_left:
-    st.markdown(f"**🔺 {metric_name} 높은 지역 TOP 10**")
-    st.dataframe(top10, use_container_width=True)
+    with st.container(border=True):
+        st.markdown(f"**🔺 {metric_name} 높은 지역 TOP 10**")
+        st.dataframe(
+            top10,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                metric_name: st.column_config.ProgressColumn(
+                    metric_name, format="%.1f%%", min_value=0, max_value=bar_max
+                )
+            },
+        )
 with col_right:
-    st.markdown(f"**🔻 {metric_name} 낮은 지역 TOP 10**")
-    st.dataframe(bottom10, use_container_width=True)
+    with st.container(border=True):
+        st.markdown(f"**🔻 {metric_name} 낮은 지역 TOP 10**")
+        st.dataframe(
+            bottom10,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                metric_name: st.column_config.ProgressColumn(
+                    metric_name, format="%.1f%%", min_value=0, max_value=bar_max
+                )
+            },
+        )
