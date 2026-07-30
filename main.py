@@ -6,7 +6,7 @@
 - 경계 데이터: 전국 시군구 255개 GeoJSON
 - '코드' 열을 기준으로 인구 데이터(읍면동)와 경계 데이터(시군구)를 연결한다.
 - 연도 슬라이더, 지표 선택(고령화율/유소년 비율), 시도 확대 기능 포함
-- 이 버전은 디자인(카드 · 색 · 표)을 다듬은 버전이다.
+- 이 버전은 배경 그라데이션 + 유리질(glass) 카드 UI로 한 단계 더 다듬은 버전이다.
 """
 
 import re
@@ -69,11 +69,18 @@ SIDO_RENAME = {
     "전라북도": "전북특별자치도",
 }
 
-ACCENT = "#6C5CE7"      # 전국 카드에 쓰는 포인트 색
+ACCENT = "#6C5CE7"      # 전국 카드 · 히어로 배너에 쓰는 포인트 색
+
+
+def hex_to_rgba(hex_color: str, alpha: float = 0.15) -> str:
+    """헥스 색상을 반투명 rgba 문자열로 바꾼다 (아이콘 배경 등에 사용)."""
+    hex_color = hex_color.lstrip("#")
+    r, g, b = tuple(int(hex_color[i : i + 2], 16) for i in (0, 2, 4))
+    return f"rgba({r},{g},{b},{alpha})"
 
 
 # ----------------------------------------------------------------------------
-# 1. 화면 스타일 (커스텀 CSS) — 카드형 UI, 한글 친화 폰트, 여백 정리
+# 1. 화면 스타일 (커스텀 CSS) — 배경 그라데이션, 유리질 카드, 한글 친화 폰트
 # ----------------------------------------------------------------------------
 def inject_style() -> None:
     st.markdown(
@@ -85,96 +92,172 @@ def inject_style() -> None:
             font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Malgun Gothic', sans-serif;
         }
 
+        /* 페이지 전체 배경 그라데이션 */
+        .stApp {
+            background:
+                radial-gradient(circle at 12% 10%, rgba(108,92,231,0.10) 0%, rgba(108,92,231,0) 40%),
+                radial-gradient(circle at 88% 85%, rgba(61,127,201,0.10) 0%, rgba(61,127,201,0) 45%),
+                linear-gradient(180deg, #f6f7fc 0%, #eef0f8 100%);
+            background-attachment: fixed;
+        }
+
         .main .block-container {
-            padding-top: 2rem;
+            padding-top: 1.6rem;
             padding-bottom: 3rem;
             max-width: 1180px;
         }
 
-        /* 상단 타이틀 영역 */
-        .app-header {
+        /* 히어로 배너 */
+        .hero {
+            background: linear-gradient(135deg, #6C5CE7 0%, #8b6ff2 45%, #b985e6 100%);
+            border-radius: 24px;
+            padding: 26px 30px;
             display: flex;
             align-items: center;
-            gap: 14px;
-            margin-bottom: 0.2rem;
+            gap: 18px;
+            box-shadow: 0 14px 32px rgba(108, 92, 231, 0.28);
+            margin-bottom: 1.5rem;
+            color: #ffffff;
         }
-        .app-title {
-            font-size: 2.1rem;
+        .hero-icon {
+            font-size: 2.2rem;
+            background: rgba(255,255,255,0.18);
+            width: 62px; height: 62px;
+            border-radius: 18px;
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0;
+        }
+        .hero-title {
+            font-size: 1.8rem;
             font-weight: 800;
-            color: #1e1b4b;
             letter-spacing: -0.5px;
         }
-        .app-sub {
-            color: #6b7280;
-            font-size: 0.98rem;
-            margin: 0.1rem 0 1.6rem 0;
+        .hero-sub {
+            font-size: 0.95rem;
+            opacity: 0.92;
+            margin-top: 4px;
         }
 
-        /* 테두리가 있는 컨테이너(st.container(border=True))를 카드처럼 */
+        /* 테두리가 있는 컨테이너(st.container(border=True))를 유리질 카드처럼 */
         div[data-testid="stVerticalBlockBorderWrapper"] {
-            background: #ffffff;
-            border-radius: 18px;
-            border: 1px solid #eef0f4;
-            box-shadow: 0 4px 18px rgba(15, 23, 42, 0.05);
+            background: rgba(255,255,255,0.72);
+            backdrop-filter: blur(14px);
+            border-radius: 20px;
+            border: 1px solid rgba(255,255,255,0.6);
+            box-shadow: 0 10px 28px rgba(30, 27, 75, 0.07);
         }
         div[data-testid="stVerticalBlockBorderWrapper"] > div {
-            border-radius: 18px;
+            border-radius: 20px;
         }
 
-        /* 섹션 소제목 */
+        /* 섹션 소제목 - 알약 모양 배지 */
         .section-title {
-            font-size: 1.05rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 1.0rem;
             font-weight: 700;
             color: #1e293b;
-            border-left: 4px solid #6C5CE7;
-            padding-left: 10px;
-            margin: 0.2rem 0 0.9rem 0;
+            background: rgba(255,255,255,0.75);
+            padding: 8px 18px;
+            border-radius: 999px;
+            border: 1px solid rgba(255,255,255,0.7);
+            box-shadow: 0 4px 14px rgba(30, 27, 75, 0.05);
+            margin: 0.4rem 0 1rem 0;
         }
 
         /* 위젯 라벨 */
         label, .stSlider label, .stSelectbox label {
-            font-weight: 600 !important;
+            font-weight: 700 !important;
             color: #374151 !important;
-            font-size: 0.88rem !important;
+            font-size: 0.86rem !important;
         }
 
         /* KPI 카드 */
         .kpi-card {
-            background: #ffffff;
-            border-radius: 18px;
+            background: rgba(255,255,255,0.72);
+            backdrop-filter: blur(14px);
+            border-radius: 20px;
             padding: 18px 20px 16px 20px;
-            border: 1px solid #eef0f4;
-            box-shadow: 0 4px 18px rgba(15, 23, 42, 0.05);
+            border: 1px solid rgba(255,255,255,0.6);
+            box-shadow: 0 10px 26px rgba(30, 27, 75, 0.07);
             border-top: 5px solid var(--accent, #6C5CE7);
             height: 100%;
         }
+        .kpi-top {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        .kpi-icon {
+            width: 36px; height: 36px;
+            border-radius: 50%;
+            background: var(--accent-soft, rgba(108,92,231,0.15));
+            display: flex; align-items: center; justify-content: center;
+            font-size: 1.05rem;
+            flex-shrink: 0;
+        }
         .kpi-label {
-            font-size: 0.82rem;
+            font-size: 0.8rem;
             font-weight: 700;
             color: #6b7280;
-            margin-bottom: 6px;
         }
         .kpi-value {
-            font-size: 1.55rem;
+            font-size: 1.5rem;
             font-weight: 800;
             color: #111827;
-            line-height: 1.25;
+            line-height: 1.3;
         }
         .kpi-sub {
-            font-size: 0.85rem;
+            font-size: 0.83rem;
             color: #9ca3af;
-            margin-top: 4px;
+            margin-top: 3px;
+        }
+
+        /* 지도 위 커스텀 범례 */
+        .legend-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: center;
+            margin: 4px 0 14px 0;
+        }
+        .legend-chip {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: #374151;
+            background: #f7f8fc;
+            padding: 5px 12px;
+            border-radius: 999px;
+            border: 1px solid #eef0f4;
+        }
+        .legend-dot {
+            width: 11px; height: 11px;
+            border-radius: 50%;
+            display: inline-block;
         }
 
         /* 알림 박스 */
         div[data-testid="stAlert"] {
-            border-radius: 14px;
+            border-radius: 16px;
         }
 
         /* 데이터프레임 모서리 둥글게 */
         div[data-testid="stDataFrame"] {
             border-radius: 14px;
             overflow: hidden;
+        }
+
+        /* 하단 푸터 캡션 */
+        .footer-note {
+            text-align: center;
+            color: #9ca3af;
+            font-size: 0.8rem;
+            margin-top: 2.2rem;
         }
         </style>
         """,
@@ -184,13 +267,30 @@ def inject_style() -> None:
 
 def kpi_card(label: str, value: str, sub: str, accent: str, icon: str) -> str:
     """지표 카드 하나를 HTML로 만든다."""
+    soft = hex_to_rgba(accent, 0.16)
     return f"""
-    <div class="kpi-card" style="--accent: {accent};">
-        <div class="kpi-label">{icon} &nbsp;{label}</div>
+    <div class="kpi-card" style="--accent: {accent}; --accent-soft: {soft};">
+        <div class="kpi-top">
+            <div class="kpi-icon">{icon}</div>
+            <div class="kpi-label">{label}</div>
+        </div>
         <div class="kpi-value">{value}</div>
         <div class="kpi-sub">{sub}</div>
     </div>
     """
+
+
+def legend_html(cfg: dict) -> str:
+    """지도 위에 보여줄 커스텀 범례를 HTML로 만든다."""
+    chips = "".join(
+        f'<div class="legend-chip"><span class="legend-dot" style="background:{color}"></span>{label}</div>'
+        for label, color in zip(cfg["labels"], cfg["colors"])
+    )
+    chips += (
+        f'<div class="legend-chip"><span class="legend-dot" '
+        f'style="background:{GRAY}"></span>{NO_DATA_LABEL}</div>'
+    )
+    return f'<div class="legend-row">{chips}</div>'
 
 
 # ----------------------------------------------------------------------------
@@ -315,10 +415,13 @@ geo_table = build_geo_table(geojson_data)
 
 st.markdown(
     """
-    <div class="app-header">
-        <div class="app-title">🗺️ 전국 고령화 지도</div>
+    <div class="hero">
+        <div class="hero-icon">🗺️</div>
+        <div>
+            <div class="hero-title">전국 고령화 지도</div>
+            <div class="hero-sub">시군구별 인구 구조(고령화율 · 유소년 비율)를 5단계로 나누어 한눈에 살펴봅니다.</div>
+        </div>
     </div>
-    <div class="app-sub">시군구별 인구 구조(고령화율 · 유소년 비율)를 5단계로 나누어 살펴봅니다.</div>
     """,
     unsafe_allow_html=True,
 )
@@ -411,7 +514,7 @@ with card1:
 with card2:
     st.markdown(
         kpi_card(
-            f"가장 높은 시군구",
+            "가장 높은 시군구",
             f"{row_max['시군구']} · {row_max[ratio_col]:.1f}%",
             row_max["시도"],
             cfg["colors"][-1],
@@ -422,10 +525,10 @@ with card2:
 with card3:
     st.markdown(
         kpi_card(
-            f"가장 낮은 시군구",
+            "가장 낮은 시군구",
             f"{row_min['시군구']} · {row_min[ratio_col]:.1f}%",
             row_min["시도"],
-            cfg["colors"][0] if cfg["colors"][0] != "#eef0f4" else "#9ca3af",
+            cfg["colors"][1],
             "🔻",
         ),
         unsafe_allow_html=True,
@@ -457,26 +560,16 @@ fig = px.choropleth(
 fig.update_geos(visible=False, fitbounds="locations")
 fig.update_traces(marker_line_color="white", marker_line_width=0.6)
 fig.update_layout(
+    showlegend=False,   # 기본 범례 대신 지도 위 커스텀 범례(legend_html)를 사용한다
     margin={"r": 10, "t": 10, "l": 10, "b": 10},
-    height=620,
+    height=600,
     paper_bgcolor="rgba(0,0,0,0)",
     plot_bgcolor="rgba(0,0,0,0)",
     font=dict(family="Pretendard, sans-serif", color="#374151"),
-    legend=dict(
-        title=None,
-        orientation="h",
-        yanchor="bottom",
-        y=-0.08,
-        xanchor="center",
-        x=0.5,
-        bgcolor="rgba(255,255,255,0.9)",
-        bordercolor="#e5e7eb",
-        borderwidth=1,
-        font=dict(size=12),
-    ),
 )
 
 with st.container(border=True):
+    st.markdown(legend_html(cfg), unsafe_allow_html=True)
     st.plotly_chart(
         fig,
         use_container_width=True,
@@ -487,7 +580,7 @@ with st.container(border=True):
 missing_in_view = view_df[view_df["비율"].isna()]
 if not missing_in_view.empty:
     names = ", ".join(missing_in_view["시도"] + " " + missing_in_view["시군구"])
-    st.info(
+    st.warning(
         f"⚠️ {selected_year}년에는 다음 지역의 코드가 경계 데이터와 맞지 않아 "
         f"회색(데이터 없음)으로 표시됩니다: {names}"
     )
@@ -538,3 +631,9 @@ with col_right:
                 )
             },
         )
+
+st.markdown(
+    '<div class="footer-note">데이터 출처: 행정안전부 주민등록인구 (읍·면·동) · '
+    "경계 데이터: 전국 시군구 GeoJSON</div>",
+    unsafe_allow_html=True,
+)
